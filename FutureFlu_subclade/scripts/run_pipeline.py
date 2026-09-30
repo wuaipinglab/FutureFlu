@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""
+Run the 2025/2026 subclade pipeline against package-local outputs.
+
+Run a selected subclade stage. Published outputs live under outputs/.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+PIPELINE_SCRIPT = PACKAGE_ROOT / "scripts" / "run_subclade_pipeline.py"
+RELEASE_FUTUREFLU = PACKAGE_ROOT / "outputs" / "predictions"
+INPUT_OMITTED_STAGES = {"sequences", "nextclade", "annotate", "linear", "component", "all"}
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse the selected workflow stage."""
+    parser = argparse.ArgumentParser(
+        description="Run 2025/2026 subclade pipeline stages."
+    )
+    parser.add_argument(
+        "stage",
+        choices=[
+            "sequences",
+            "definitions",
+            "nextclade",
+            "annotate",
+            "linear",
+            "counts",
+            "component",
+            "aux",
+            "all",
+            "validate",
+        ],
+    )
+    return parser.parse_args()
+
+
+def validate_packaged_counts() -> None:
+    """Validate retained count and truth tables without strain annotations."""
+    required = [
+        PACKAGE_ROOT / "data" / "futureflu_rank" / "circulating_subclade.csv",
+        PACKAGE_ROOT
+        / "data"
+        / "subclade_counts"
+        / "submission_collection_subclade_count_h1n1.csv",
+        PACKAGE_ROOT
+        / "data"
+        / "subclade_counts"
+        / "submission_collection_subclade_count_h3n2.csv",
+        PACKAGE_ROOT
+        / "data"
+        / "subclade_counts"
+        / "submission_collection_subclade_count_victoria.csv",
+    ]
+    missing = [path for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "packaged count/truth tables are missing:\n"
+            + "\n".join(str(path) for path in missing)
+        )
+    for path in required:
+        if path.stat().st_size == 0:
+            raise RuntimeError(f"packaged count/truth table is empty: {path}")
+        print(f"[counts] verified {path.relative_to(PACKAGE_ROOT)}")
+
+
+def validate_release_layout() -> None:
+    """Check that published outputs exist under outputs/predictions."""
+    required_dirs = [
+        RELEASE_FUTUREFLU / "linear" / "results",
+        RELEASE_FUTUREFLU / "risk_components" / "subclade_accuracy",
+        RELEASE_FUTUREFLU / "risk_components" / "component_combinations",
+        RELEASE_FUTUREFLU / "risk_components" / "mutation_components",
+    ]
+    required_files = [
+        RELEASE_FUTUREFLU / "risk_components" / "risk_mutation_group_component.csv",
+        RELEASE_FUTUREFLU
+        / "risk_components"
+        / "mutation_components"
+        / "risk_mutation_group_component.csv",
+        RELEASE_FUTUREFLU
+        / "risk_components"
+        / "subclade_accuracy"
+        / "subclade_component_acc.csv",
+        RELEASE_FUTUREFLU
+        / "risk_components"
+        / "component_combinations"
+        / "EGD_combine_Twindow.csv",
+        PACKAGE_ROOT / "data" / "ha1_clade_priors" / "clade_component_max.csv",
+        PACKAGE_ROOT / "data" / "ha1_clade_priors" / "submission_collection_clade_count_h1n1.csv",
+        PACKAGE_ROOT / "data" / "ha1_clade_priors" / "submission_collection_clade_count_h3n2.csv",
+        PACKAGE_ROOT / "data" / "ha1_clade_priors" / "submission_collection_clade_count_victoria.csv",
+    ]
+    missing = [path for path in required_dirs + required_files if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            "required published outputs are missing:\n"
+            + "\n".join(str(path) for path in missing)
+        )
+    print("[validate] published outputs are present")
+
+
+def main() -> None:
+    """Run one stage."""
+    args = parse_args()
+    if args.stage in {"sequences", "nextclade"}:
+        raise SystemExit(
+            "25-26 uses packaged 20250831 sequence tables. "
+            "The 20260131 sequence/Nextclade stack is not part of this package."
+        )
+    if args.stage in {"annotate", "linear", "component", "all"}:
+        raise SystemExit(
+            "This results-only package does not ship the 20250831 sequence tables. "
+            "Use FutureFlu_Github_test for a full rerun."
+        )
+    if args.stage == "counts":
+        validate_packaged_counts()
+    elif args.stage == "validate":
+        validate_release_layout()
+    else:
+        subprocess.run([sys.executable, str(PIPELINE_SCRIPT), args.stage], check=True)
+    if args.stage in {"definitions", "counts", "aux"}:
+        validate_release_layout()
+
+
+if __name__ == "__main__":
+    main()
